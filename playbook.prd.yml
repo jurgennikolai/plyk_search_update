@@ -1,0 +1,109 @@
+- name: Search and Update Files
+  hosts: all
+  become: yes
+  vars: 
+        pathList: 
+                - name: '/etc/resolv.conf'
+                  search: "nameserver 192.168.1.71"
+                  changeLine: false
+                  line: "nameserver 192.168.1.2"
+                        
+                - name: '/etc/temp_file.niko'
+                  search: "miEdad\\s*=\\s*NA"
+                  changeLine: true
+                  line: 'miEdad = 22 '
+
+                - name: '/etc/resolv.confgg'
+                  search: "nameserver 192.168.1.1"
+                  changeLine: true
+                  line: "nameserver 192.168.1.2"
+
+  tasks: 
+        - name: Search Files With The Grep Command
+          shell:
+               "grep '{{item.search}}' {{item.name}}"
+          loop: "{{pathList}}"
+          ignore_unreachable: false
+          ignore_errors: true
+          register:
+                 var_result
+
+        - name: Make Change on the Same Line
+          replace:
+                  path: '{{item.name}}'
+                  regexp: '{{item.search}}'
+                  replace: '{{item.line}}'
+                  backup: true
+
+          loop: "{{pathList}}"
+          register: var_changeLines
+          ignore_unreachable: false
+          ignore_errors: true
+          when: item.changeLine
+ 
+        - name: Add a new Line in the File
+          lineinfile:
+                  path: '{{item.name}}'
+                  line: '{{item.line}}'
+                  backup: true
+
+          loop: "{{pathList}}"
+          register: var_newLines
+          ignore_unreachable: false
+          ignore_errors: true
+          when: not item.changeLine
+                           
+- name: Save Search Results Data and Update
+  hosts: localhost
+  become: yes
+  tasks:
+          - name: File Status Report
+            copy:
+                    dest: './file_status_report.csv'
+                    content: | 
+                            host, S.O, file, search, file exists, text found
+                            {% for host in groups.all %}
+                            {% if hostvars[host].var_result is defined %}
+                            {% with var_main=hostvars[host].var_result , host_data=hostvars[host] %}
+                            {% for result in var_main.results %}
+                            {% if result.stdout_lines|length > 0 %}
+                            {{ host }}, {{host_data.ansible_distribution}} {{host_data.ansible_distribution_version}}, {{ result.item.name }}, {{ result.item.search }}, True, True     
+                            {% elif result.failed %}
+                            {{ host }}, {{host_data.ansible_distribution}} {{host_data.ansible_distribution_version}}, {{ result.item.name }}, {{ result.item.search }}, False, False
+                            {% else %}
+                            {{ host }}, {{host_data.ansible_distribution}} {{host_data.ansible_distribution_version}}, {{ result.item.name }}, {{ result.item.search }}, False, True
+                            {% endif %}
+                            {% endfor %}
+                            {% endwith %}
+                            {% else %}
+                            {{ host }}, N/A, N/A, N/A, N/A, N/A
+                            {% endif %}
+                            {% endfor %}
+
+          - name: File Update Status Report
+            copy:
+                    dest: './file_update_status_report.csv'
+                    content: | 
+                            host, S.O, file, search, changeLine, line, changed, failed, backupFile, msg
+                            {% for host in groups.all %}
+                            {% if hostvars[host].var_changeLines is defined %}
+                            {% with var_main=hostvars[host].var_changeLines , host_data=hostvars[host] %}
+                            {% for result in var_main.results %}
+                            {% if result.skipped is not defined %} 
+                            {{- host }}, {{host_data.ansible_distribution}} {{host_data.ansible_distribution_version}}, {{ result.item.name }}, {{ result.item.search }}, {{ result.item.changeLine }}, {{ result.item.line }}, {{ result.changed }}, {{ result.failed }}, {% if result.backup_file is defined %} {{ result.backup_file}} {% endif %} , {{ result.msg }}     
+                            {% endif %}
+                            {% endfor %}
+                            {% endwith %}
+                            {% endif %}
+                            {% if hostvars[host].var_newLines is defined %}
+                            {% with var_main=hostvars[host].var_newLines , host_data=hostvars[host] %}
+                            {% for result in var_main.results %}
+                            {% if result.skipped is not defined %}
+                            {{- host }}, {{host_data.ansible_distribution}} {{host_data.ansible_distribution_version}}, {{ result.item.name }}, {{ result.item.search }}, {{ result.item.changeLine }}, {{ result.item.line }}, {{ result.changed }}, {{ result.failed }}, {% if result.backup_file is defined %} {{ result.backup_file}} {% endif %} , {{ result.msg }}                                                
+                            {% endif %}
+                            {% endfor %}
+                            {% endwith %}
+                            {% else %}
+                            {{- host }}, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A
+                            {% endif %}
+                            {% endfor %}
